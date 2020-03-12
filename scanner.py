@@ -1,11 +1,12 @@
+import json
+import logging
 import os
+import random 
 import shutil
 import subprocess
 import sys
-import json # TODO alphabetize
 import tempfile
 import time
-import logging
 
 import numpy as np
 import pandas as pd
@@ -13,80 +14,81 @@ import pandas as pd
 import strax
 import straxen
 
-# from straxen import get_to_pe
-st = straxen.contexts.strax_workshop_dali()
-
-# TODO, go line by line on adding this back to see what the heck is going on
 #SBATCH --job-name=scanner_{name}_{config}                                                             
-#SBATCH --ntasks=1                                                                         
-#SBATCH --cpus-per-task={n_cpu}                                                                  
-#SBATCH --time={max_hours}:00:00                                                                  
-#SBATCH --partition={partition}                                                                  
-#SBATCH --account=pi-lgrandi                                                                    
-#SBATCH --qos={partition}                                                                     
-#SBATCH --output={log_fn}                                                                     
-#SBATCH --error={log_fn}
-# Try to make the smallest difference possible to isolate the issue.
+# Previous issue was that the job-name was too long. 
+# There's some quota on how many characters or something a job-name can be.
+# mem-per-cpu argument doesn't work on dali not sure why. Too many computers requested I believe.
 JOB_HEADER = """#!/bin/bash
-#SBATCH --job-name=strax
+#SBATCH --job-name=scan_{name}
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=40
-#SBATCH --time=8:00:00
-#SBATCH --partition=dali
+#SBATCH --cpus-per-task={n_cpu}
+#SBATCH --time={max_hours}:00:00
+#SBATCH --partition={partition}
 #SBATCH --account=pi-lgrandi
-#SBATCH --qos=dali
-
+#SBATCH --qos={partition}
+#SBATCH --output={log_fn}
+#SBATCH --error={log_fn}
 {extra_header}
 
 # Conda
 . "{conda_dir}/etc/profile.d/conda.sh"
 {conda_dir}/bin/conda activate {env_name}
 
-echo Starting jupyter job
+echo Starting scanner
 
 python {python_file} {run_id} {data_path} {config_file} 
 """
 
-# TODO, simplify defaults
-def scan_parameters(strax_options=[{'run_id' : '180215_1029', 'config' : {'tail_veto_threshold' : 1e4, 
-                                                                          'tail_veto_pass_fraction' : 1e3}},
-                                   {'run_id' : '180215_1029', 'config' : {'dummy' : 2}},],
-                    directory='/dali/lgrandi/andaloro/parameter_scan/',
+
+def scan_parameters(strax_options=[{'run_id' : '180215_1029', 'config' : {'tail_veto_threshold' : 1e5, 
+                                                                          'tail_veto_pass_fraction' : 0.05}},
+                                   {'run_id' : '180215_1029', 'config' : {'other_options': 3}},],
+                    directory=os.getcwd() + '/parameter_scan',
                     **kwargs):
-    """This is what people call
+    """Called in mystuff.py to run specified jobs. 
+    
+    This main function goes through and runs jobs based on the options given in strax.
+    Currently this is constructed to call submit_setting, which then eventually starts a job and proceeds to get a dataframe of event_info, thereby processing all data for specified runs.
 
-    Document this with a paragraph and parameters here.
-
-    kwargs - max_hours, extra_header, n_cpu, mem_per_cpu
+    Params: 
+    strax_options: a dictionary which must include:
+        - 'run_id' (default is '180215_1029')
+        - 'config' (strax configuration options)
+        - A directory to save the job logs in. Default is current directory in a new file.
+        - kwargs: max_hours, extra_header, n_cpu, ram (typical dali job sumission arguments apply.)
     """
-    # Some checks on input
-
-    # TODO: Check that directory exists, otherwise make it.  Use 'os'.
+    
+    # Check that directory exists, else make it
+    if not os.path.exists(directory):
+        os.makedirs(directory)
 
     # Submit each of these, such that it calls me (parameter_scan.py) with submit_setting option
     for i, strax_option in enumerate(strax_options):
         print('Submitting %d with %s' % (i, strax_option))
-        submit_setting(i=i, directory=directory, **strax_option)
+        submit_setting(directory=directory, **strax_option)
 
     pass
 
-def make_executable(path):
-    """Make the file at path executable
-
-    TODO
+def submit_setting(run_id, config, directory, **kwargs):
     """
-    mode = os.stat(path).st_mode
-    mode |= (mode & 0o444) >> 2    # copy R bits to X
-    os.chmod(path, mode)
-
-def submit_setting(i, run_id, config, directory, **kwargs):
-    """Docstring TODO
-
-    More on what this does TODO.
-document these variables
+    Submits a job with a certain setting.
+    
+    Given input setting arguments, submit_setting will take a current run and submit a job to dali that calles this code itself (so not runs scanner.py directly.) First, files are created temporarily in directory (arg) that document what you have submitted. These are then used to submit a typical job to dali. This then bumps us down to if __name__ == '__main__' since we call it directly. You could alternatively switch this so that if we submit_setting we run a different file. 
+    
+    Arguments:
+    run_id (str): run id of the run to submit the job for. Currently not tested if multiple run id's work but they should
+    config (dict): a dictionary of configuration settings to try (see strax_options in mystuff.py for construction of these config settings)
+    directory (str): Place where the job logs will get saved. These are short files just with the parameters saved and log of what happened, but can be useful in debugging.
+    **kwargs (optional): can include the following
+        - n_cpu : numbers of cpu for this job. Default 40. Decreasing this to minimum needed will get your job to submit to dali faster!
+        - max_hours: max hours to run job. Default 8
+        - name: the appendix you want to scan_{name} which shows up in dali. Defaults "magician" if not specified so change if you're not a wizard.
+        - mem_per_cpu: (MB) default is 4480 MB for RAM per CPU. May need more to run big processing.
+        - partition: Default to dali
+        - conda_dir: Where is your environment stored? Default is /dali/lgrandi/strax/miniconda3 (for backup strax env). Change?
+        - env_name: Which conda env do you want, defaults to strax inside conda_dir
     """
-    # This is what the script will actually execute
-    print(i)
+    
     job_fn = tempfile.NamedTemporaryFile(delete=False,
                                          dir=directory).name
     log_fn = tempfile.NamedTemporaryFile(delete=False,
@@ -94,7 +96,8 @@ document these variables
 
     config_fn = tempfile.NamedTemporaryFile(delete=False,
                                             dir=directory).name
-
+    
+    #Takes configuration parameters and dumps the stringed version into a file called config_fn
     with open(config_fn, mode='w') as f:
         json.dump(config, f)
 
@@ -102,32 +105,34 @@ document these variables
     # TODO: move these default settings out to above somehow.  Maybe a default dictionary
     # that gets overloaded?
     with open(job_fn, mode='w') as f:
-        # Rename such that not just calling header, TODO
+        # Rename such that not just calling header, I think this is done now, no?
         # TODO PEP8
-        # TODO sort these by importance or alphabetical
         f.write(JOB_HEADER.format(  
             log_fn=log_fn,
             config=str(config),
-            max_hours=kwargs.get('max_hours',
-                                 8),
-            extra_header=kwargs.get('extra_header',
-                                    ''),
-            n_cpu=kwargs.get('n_cpu',
-                             40),
-            mem_per_cpu=kwargs.get('mem_per_cpu',
-                                   4480),
-            conda_dir=kwargs.get('conda_dir',
-                                 '/dali/lgrandi/strax/miniconda3'),
-            partition='dali',
-            env_name=kwargs.get('env_name', 'strax'),
             python_file=os.path.abspath(__file__),
             config_file = config_fn,
-            run_id=run_id,
-            data_path='/dali/lgrandi/andaloro/strax_data', # TODO refactor this out into a variable that gets passed in.
+            name = kwargs.get('job_name',
+                              'magician'),
+            n_cpu=kwargs.get('n_cpu',
+                             40),            
+            max_hours=kwargs.get('max_hours',
+                                 8),
+            mem_per_cpu=kwargs.get('mem-per-cpu',
+                                   4480),
+            partition=kwargs.get('partition',
+                                    'dali'),
+            conda_dir=kwargs.get('conda_dir',
+                                 '/dali/lgrandi/strax/miniconda3'),
+            env_name=kwargs.get('env_name', 'strax'),
+            run_id=kwargs.get('run_id',
+                               '180215_1029'),
+            data_path=kwargs.get('data_path', 
+                                 '/dali/lgrandi/andaloro/strax_data'), #Need to not make mine somehow.
+            extra_header=kwargs.get('extra_header',
+                                    ''),
         ))
-
-    # Is this necessary? TODO
-    make_executable(job_fn)
+    print(sys.argv)
 
     print("\tSubmitting sbatch %s" % job_fn)
     result = subprocess.check_output(['sbatch', job_fn])
@@ -137,7 +142,7 @@ document these variables
 
     print("\tYou have job id %d" % job_id)
 
-def work(run_id, data_path, config):
+def work(run_id, data_path, config, **kwargs):
     st = straxen.contexts.strax_workshop_dali()
     
     st.storage[-1] = strax.DataDirectory(data_path,
@@ -146,28 +151,32 @@ def work(run_id, data_path, config):
     df = st.get_df(run_id,
                         'event_info',
                         config=config,
-                        max_workers=40) # Make this 40 a variable that gets passed through TODO
+                        max_workers = kwargs.get('n_cpu', 
+                                                 40))
+    
+#     path_to_df = 'scanner_dfs/'
+# Currently not working. Saving df's needs to get figured out by Sophia, if choosing to do that way.
+#     veto_st = "{:.0f}".format(config['tail_veto_threshold'])
+#     pass_st = "{:.0f}".format(config['tail_veto_pass_fraction']*config['tail_veto_threshold'])
+#     key_temp = 'he_val'+ veto_st + 'pass_tot' + pass_st
+#     key_temp = "he_val" + str(veto_st) + "pass_val" + str(pass_st)
+#     df.to_hdf(path_to_df + 'checking_software_scanner8.h5', key=key_temp, mode='a')
 
-    print(df.head())
 
- 
-                                          
-
-
-if __name__ == "__main__":
+if __name__ == "__main__": #happens if submit_setting() is called
     if len(sys.argv) == 1: # argv[0] is the filename
         print('hi I am ', __file__)
         scan_parameters()
     elif len(sys.argv) == 4:
         run_id = sys.argv[1]
         data_path = sys.argv[2]
-        config_fn = sys.argv[3] # TODO: Check variable names consistent
-
+        config_fn = sys.argv[3]
         print(run_id, data_path, config_fn)
 
+        # Reread the config file to grab the config parameters
         with open(config_fn, mode='r') as f:
             config = json.load(f)
-
-        work(run_id, data_path, config)
+        
+        work(run_id=run_id, data_path=data_path, config=config, max_workers=40)
     else:
         raise ValueError("Bad command line arguments")
