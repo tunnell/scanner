@@ -147,17 +147,12 @@ def work(run_id, data_path, config, save_df=False, **kwargs):
     
     st.storage[-1] = strax.DataDirectory(data_path,
                                          provide_run_metadata=False)
-    path_to_df = 'scanner_dfs/'
-    df = st.get_df(run_id,
-                        'event_info',
-                        config=config,
-                        max_workers = kwargs.get('n_cpu', 
-                                                 40))
-    if save_df = True: #For Sophia 
-        veto_st = "{:.0f}".format(config['tail_veto_threshold'])
-        pass_st = "{:.0f}".format(config['tail_veto_pass_fraction']*config['tail_veto_threshold'])
-        key_temp = 'he_val'+ veto_st + 'pass_tot' + pass_st
-        df.to_hdf(path_to_df + key_temp + '.h5', key = key_temp, mode='a')
+
+    st.make(run_id,
+            'event_info',
+            config=config,
+            max_workers = kwargs.get('n_cpu', 
+                                     40))
 
 if __name__ == "__main__": #happens if submit_setting() is called
     if len(sys.argv) == 1: # argv[0] is the filename
