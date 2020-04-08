@@ -36,7 +36,7 @@ JOB_HEADER = """#!/bin/bash
 
 echo Starting scanner
 
-python {python_file} {run_id} {data_path} {config_file} 
+python {python_file} {run_id} {data_path} {data_path2} {config_file} 
 """
 
 
@@ -125,10 +125,11 @@ def submit_setting(run_id, config, directory, **kwargs):
             conda_dir=kwargs.get('conda_dir',
                                  '/dali/lgrandi/strax/miniconda3'),
             env_name=kwargs.get('env_name', 'strax'),
-            run_id=kwargs.get('run_id',
-                               '180215_1029'),
+            run_id=run_id,
             data_path=kwargs.get('data_path', 
                                  '/dali/lgrandi/andaloro/strax_data'), #Need to not make mine somehow.
+            data_path2=kwargs.get('data_path2',
+                                  'none'),
             extra_header=kwargs.get('extra_header',
                                     ''),
         ))
@@ -142,11 +143,26 @@ def submit_setting(run_id, config, directory, **kwargs):
 
     print("\tYou have job id %d" % job_id)
 
-def work(run_id, data_path, config, save_df=False, **kwargs):
-    st = straxen.contexts.strax_workshop_dali()
-    
-    st.storage[-1] = strax.DataDirectory(data_path,
-                                         provide_run_metadata=False)
+def get_context(data_path, data_path2):
+    st = straxen.contexts.xenon1t_dali(build_lowlevel=True)
+    if data_path2 is not "none":
+        st.storage = [strax.DataDirectory(data_path,
+                                          take_only='raw_records',
+                                          provide_run_metadata=True,
+                                          deep_scan=False,
+                                          readonly=True),
+                      strax.DataDirectory(data_path2,
+                                          readonly=False,
+                                          provide_run_metadata=False)]
+    else:
+        st.storage[-1] = strax.DataDirectory(data_path,
+                                             provide_run_metadata=False)
+
+    return st
+
+
+def work(run_id, data_path, data_path2, config, **kwargs):
+    st = get_context(data_path, data_path2)
 
     st.make(run_id,
             'event_info',
@@ -158,16 +174,17 @@ if __name__ == "__main__": #happens if submit_setting() is called
     if len(sys.argv) == 1: # argv[0] is the filename
         print('hi I am ', __file__)
         scan_parameters()
-    elif len(sys.argv) == 4:
+    elif len(sys.argv) == 5:
         run_id = sys.argv[1]
         data_path = sys.argv[2]
-        config_fn = sys.argv[3]
-        print(run_id, data_path, config_fn)
+        data_path2 = sys.argv[3]
+        config_fn = sys.argv[4]
+        print(run_id, data_path, data_path2, config_fn)
         print("Things are changing")
         # Reread the config file to grab the config parameters
         with open(config_fn, mode='r') as f:
             config = json.load(f)
         
-        work(run_id=run_id, data_path=data_path, config=config, max_workers=40)
+        work(run_id=run_id, data_path=data_path, data_path2=data_path2, config=config, max_workers=40)
     else:
         raise ValueError("Bad command line arguments")
