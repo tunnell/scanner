@@ -15,9 +15,9 @@ strax_options = [{'run_id': run_id, 'config' : {},
                   'data_path' : data_path,
                   'data_path2' : data_path2} for run_id in runs['name']]
 
-print(strax_options[0])
+print(strax_options)
 
-scanner.scan_parameters([strax_options[0]])
+scanner.scan_parameters(strax_options)
 
 
 
